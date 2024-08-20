@@ -7,6 +7,8 @@ An attempt to implement async/await in Go
 
 go get github.com/mgperkowski/goasyncawait/async
 
+```
+
 ## Example Usage
 
 ```go
@@ -62,3 +64,5 @@ func main() {
 		fmt.Println("All promises resolved with results:", results)
 	}
 }
+
+```
