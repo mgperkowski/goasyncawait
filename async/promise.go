@@ -16,14 +16,12 @@ func NewPromise(execute func(resolve func(interface{}), reject func(error))) *Pr
 		result:  make(chan interface{}, 1),
 		err:     make(chan error, 1),
 	}
-	p.Execute()
-	return p
-}
 
-func (p *Promise) Execute() {
 	go func() {
 		p.execute(p.resolve, p.reject)
 	}()
+
+	return p
 }
 
 func (p *Promise) resolve(value interface{}) {
