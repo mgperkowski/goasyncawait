@@ -6,92 +6,102 @@ import (
 
 type Promise struct {
 	execute func(resolve func(interface{}), reject func(error))
-	result  chan interface{}
-	err     chan error
+	result  interface{}
+	err     error
+	done    bool
+	mutex   sync.Mutex
+	wg      sync.WaitGroup
 }
 
 func NewPromise(execute func(resolve func(interface{}), reject func(error))) *Promise {
 	p := &Promise{
 		execute: execute,
-		result:  make(chan interface{}, 1),
-		err:     make(chan error, 1),
 	}
+	p.wg.Add(1)
 
-	go func() {
-		p.execute(p.resolve, p.reject)
-	}()
-
+	go p.execute(p.resolve, p.reject)
 	return p
 }
 
 func (p *Promise) resolve(value interface{}) {
-	p.result <- value
-	close(p.result)
-	close(p.err)
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	if !p.done {
+		p.result = value
+		p.done = true
+		p.wg.Done()
+	}
 }
 
 func (p *Promise) reject(err error) {
-	p.err <- err
-	close(p.err)
-	close(p.result)
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	if !p.done {
+		p.err = err
+		p.done = true
+		p.wg.Done()
+	}
 }
 
 func (p *Promise) Await() (interface{}, error) {
-	select {
-	case res := <-p.result:
-		return res, nil
-	case err := <-p.err:
-		return nil, err
-	}
+	p.wg.Wait()
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	return p.result, p.err
 }
 
 func AwaitAll(promises []*Promise) ([]interface{}, error) {
 	var wg sync.WaitGroup
+	var mutex sync.Mutex
 	results := make([]interface{}, len(promises))
-	errorsChan := make(chan error, len(promises))
+	var firstError error
 
 	for i, p := range promises {
 		wg.Add(1)
-		go func(i int, p *Promise) {
+		go func(index int, promise *Promise) {
 			defer wg.Done()
-			result, err := p.Await()
-			if err != nil {
-				errorsChan <- err
-				return
+			result, err := promise.Await()
+
+			mutex.Lock()
+			defer mutex.Unlock()
+
+			if err != nil && firstError == nil {
+				firstError = err
 			}
-			results[i] = result
+
+			if firstError == nil {
+				results[index] = result
+			}
 		}(i, p)
 	}
 
 	wg.Wait()
-	close(errorsChan)
 
-	if len(errorsChan) > 0 {
-		return nil, <-errorsChan
+	if firstError != nil {
+		return nil, firstError
 	}
 
 	return results, nil
 }
 
 func AwaitRace(promises []*Promise) (interface{}, error) {
-	resultChan := make(chan interface{})
-	errorChan := make(chan error)
+	resultChan := make(chan struct {
+		result interface{}
+		err    error
+	})
 
 	for _, p := range promises {
-		go func(p *Promise) {
-			result, err := p.Await()
-			if err != nil {
-				errorChan <- err
-			} else {
-				resultChan <- result
-			}
+		go func(promise *Promise) {
+			result, err := promise.Await()
+			resultChan <- struct {
+				result interface{}
+				err    error
+			}{result, err}
 		}(p)
 	}
 
-	select {
-	case res := <-resultChan:
-		return res, nil
-	case err := <-errorChan:
-		return nil, err
-	}
+	firstResult := <-resultChan
+	return firstResult.result, firstResult.err
 }
