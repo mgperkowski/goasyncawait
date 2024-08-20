@@ -1,16 +1,3 @@
-# goasyncawait
-An attempt to implement async/await in Go
-
-## Installation
-
-```bash
-
-go get github.com/mgperkowski/goasyncawait/async
-
-## Example Usage
-
-```go
-
 package main
 
 import (
